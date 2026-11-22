@@ -3,9 +3,8 @@ import type { Role } from '@/types'
 /*
  * Role-aware UI visibility.
  *
- * This only hides controls that a role cannot use — it is NOT access control. The backend enforces the
- * same rules (permission policy, ADR-0004: backend/src/modules/sources-provenance/permissions); keep the
- * two in step so nobody is shown a button that always answers 403.
+ * This only hides controls that a role cannot use — it is NOT access control. firestore.rules enforces the
+ * same rules; keep the two in step so nobody is shown a button that is always refused.
  */
 export const can = {
   manageUsers: (role?: Role) => role === 'admin',

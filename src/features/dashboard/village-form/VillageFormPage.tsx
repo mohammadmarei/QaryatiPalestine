@@ -11,7 +11,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Stepper } from '@/components/ui/Stepper'
 import { useAuth } from '@/hooks/useAuth'
 import { useData } from '@/hooks/useData'
-import { ApiError } from '@/api/client'
+import { errorMessage } from '@/firebase/errors'
 import { useI18n } from '@/hooks/useI18n'
 import { useToast } from '@/hooks/useToast'
 import { buildVillageSchema, emptyValues, stepFields, valuesFromVillage, villageFromValues, type VillageFormValues } from './schema'
@@ -22,7 +22,7 @@ const stepComponents = [BasicStep, NamesStep, AdminStep, GeoStep, PopulationStep
 export function VillageFormPage({ mode }: { mode: 'create' | 'edit' }) {
   const { id } = useParams()
   const { t, pick } = useI18n()
-  const { villages, population, saveVillage, setVillagePopulation } = useData()
+  const { villages, population, saveVillage } = useData()
   const { user } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
@@ -99,9 +99,9 @@ export function VillageFormPage({ mode }: { mode: 'create' | 'edit' }) {
   }
 
   /**
-   * Saves through the API: the village row, its sections, then its population series. Draft saves accept
-   * incomplete data, but never invent it: coordinates left empty stay "not documented" (ADR-0008); the
-   * server refuses to publish without them.
+   * Saves the village document with its sections and population series. Draft saves accept incomplete
+   * data, but never invent it: coordinates left empty stay "not documented", and the security rules refuse
+   * to publish a village without them.
    */
   const persist = async (values: VillageFormValues, statusOverride?: VillageFormValues['status']) => {
     const validNum = (s: string) => s.trim() !== '' && !Number.isNaN(Number(s))
@@ -114,13 +114,13 @@ export function VillageFormPage({ mode }: { mode: 'create' | 'edit' }) {
     }
     const current = existing ?? villages.find((v) => v.id === draftId)
     const { village, population: records } = villageFromValues(sanitized, current, user?.id ?? '', villages.map((v) => v.id))
-    const savedId = await saveVillage(village, current ? 'update' : 'create')
-    await setVillagePopulation(savedId, records.map((r) => ({ ...r, villageId: savedId })))
+    // One write: the village document holds its population series too.
+    const savedId = await saveVillage(village, current ? 'update' : 'create', records)
     return { ...village, id: savedId }
   }
 
   const failed = (title: string, error: unknown) =>
-    toast.error(title, error instanceof ApiError ? error.userMessage : t('Unexpected error', 'خطأ غير متوقع'))
+    toast.error(title, errorMessage(error))
 
   const saveDraft = async () => {
     const ok = await trigger(['nameAr', 'nameEn'])
@@ -134,7 +134,10 @@ export function VillageFormPage({ mode }: { mode: 'create' | 'edit' }) {
       const v = await persist(getValues(), mode === 'create' ? 'draft' : undefined)
       setDraftId(v.id)
       methods.reset(getValues())
-      toast.success(t('Draft saved', 'تم حفظ المسودة'), t('Saved on the server as a draft.', 'حُفظت على الخادم كمسودة.'))
+      toast.success(
+        t('Draft saved', 'تم حفظ المسودة'),
+        user?.role === 'contributor' ? t('Sent to the review queue.', 'أُرسلت إلى قائمة المراجعة.') : t('Saved as a draft.', 'حُفظت كمسودة.'),
+      )
     } catch (error) {
       failed(t('The draft was not saved', 'لم تُحفظ المسودة'), error)
     } finally {
@@ -151,7 +154,7 @@ export function VillageFormPage({ mode }: { mode: 'create' | 'edit' }) {
   const confirmSave = async () => {
     setSubmitting(true)
     const values = getValues()
-    // Contributors cannot publish: the server keeps their village as a draft until an editor publishes it.
+    // Contributors cannot publish: their village is proposed as a draft, and an editor publishes it.
     const status = user?.role === 'contributor' ? 'draft' : values.status
     try {
       await persist(values, status)

@@ -1,128 +1,164 @@
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { FirebaseError } from 'firebase/app'
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  setPersistence,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  type User as FirebaseUser,
+} from 'firebase/auth'
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
 import type { User } from '@/types'
-import { api, ApiError, setAccessToken, setUnauthorizedHandler } from '@/api/client'
-import { userFromApi } from '@/api/mappers'
-import type { ApiLoginResponse, ApiUser } from '@/api/types'
-import { storage } from '@/utils/storage'
+import { auth, db } from '@/config/firebase'
+import { userFromDoc, type UserDoc } from '@/firebase/model'
 
 /*
- * Sign-in against the API (POST /auth/login, JWT). The access token is kept in memory, and in
- * localStorage only when "remember me" is ticked. GET /auth/me checks a remembered token on start-up.
- * A 401 on any signed-in request (expired token) signs the user out.
+ * Sign-in with Firebase Authentication (email and password). The role and the account status are not part
+ * of the Firebase account: they are in users/{uid}, which the security rules read too. A new account gets
+ * that document as an active contributor; only an admin changes it afterwards.
+ * "Remember me" keeps the session in local storage, otherwise it ends with the browser tab.
  */
-
-const SESSION_KEY = 'qaryati.session.v2'
-
-interface StoredSession {
-  token: string
-  user: User
-}
-
 
 export type LoginResult = { ok: true; user: User } | { ok: false; error: 'invalid' | 'disabled' | 'network' | 'rate-limited' }
 
 export interface AuthValue {
   user: User | null
-  /** True while a remembered session is being checked on start-up. */
+  /** True until Firebase has said whether a session is open. */
   restoring: boolean
   login: (email: string, password: string, remember: boolean) => Promise<LoginResult>
   register: (name: string, email: string, password: string) => Promise<{ ok: boolean; error?: 'exists' | 'invalid' | 'network' }>
   logout: () => void
-  /** Name and organisation shown in this browser; the API has no endpoint for editing one's own profile. */
+  /** Sends Firebase's password reset email. */
+  resetPassword: (email: string) => Promise<{ ok: boolean; error?: 'network' | 'invalid' }>
+  /** Updates the signed-in user shown in the app (the profile page writes it to users/{uid} through useData). */
   updateUser: (patch: Partial<Pick<User, 'name' | 'email' | 'organization'>>) => void
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const AuthContext = createContext<AuthValue | null>(null)
 
-function loginError(error: unknown): LoginResult {
-  if (error instanceof ApiError) {
-    if (error.status === 429) return { ok: false, error: 'rate-limited' }
-    if (error.status === 403) return { ok: false, error: 'disabled' }
-    if (error.status === 0) return { ok: false, error: 'network' }
+/** While an account is being created, register() writes its profile; the listener must not race it. */
+let registering = false
+
+/** Reads users/{uid}, creating it for an account that has none yet (new sign-up, or made in the console). */
+async function loadProfile(fb: FirebaseUser, name?: string): Promise<User> {
+  const ref = doc(db, 'users', fb.uid)
+  const snap = await getDoc(ref)
+  const now = new Date().toISOString()
+  if (!snap.exists()) {
+    const fresh: UserDoc = {
+      name: name?.trim() || fb.displayName || (fb.email ?? '').split('@')[0],
+      email: fb.email ?? '',
+      role: 'contributor',
+      active: true,
+      createdAt: now,
+      lastActiveAt: now,
+    }
+    await setDoc(ref, fresh)
+    return userFromDoc(fb.uid, fresh)
   }
-  return { ok: false, error: 'invalid' }
+  const data = snap.data() as UserDoc
+  if (data.active) void updateDoc(ref, { lastActiveAt: now }).catch(() => undefined)
+  return userFromDoc(fb.uid, { ...data, lastActiveAt: now })
 }
 
+const code = (error: unknown) => (error instanceof FirebaseError ? error.code : '')
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Read the remembered session once, and give the client its token before the first request.
-  const [stored] = useState(() => {
-    const session = storage.getJSON<StoredSession | null>(SESSION_KEY, null)
-    if (session) setAccessToken(session.token)
-    return session
-  })
-  const [user, setUser] = useState<User | null>(stored?.user ?? null)
-  const [restoring, setRestoring] = useState(Boolean(stored))
-  const [remember, setRemember] = useState(Boolean(stored))
+  const [user, setUser] = useState<User | null>(null)
+  const [restoring, setRestoring] = useState(true)
+
+  useEffect(
+    () =>
+      onAuthStateChanged(auth, (fb) => {
+        if (registering) return
+        if (!fb) {
+          setUser(null)
+          setRestoring(false)
+          return
+        }
+        loadProfile(fb)
+          .then((u) => {
+            if (!u.active) {
+              setUser(null)
+              void signOut(auth)
+            } else setUser(u)
+          })
+          .catch(() => setUser(null))
+          .finally(() => setRestoring(false))
+      }),
+    [],
+  )
 
   const logout = useCallback(() => {
-    setAccessToken(null)
-    storage.remove(SESSION_KEY)
+    void signOut(auth)
     setUser(null)
   }, [])
 
-  // Confirm a remembered token with the API.
-  useEffect(() => {
-    setUnauthorizedHandler(logout)
-    if (!stored) return
-    api<ApiUser>('/auth/me')
-      .then((me) => {
-        const fresh = { ...stored.user, ...userFromApi(me), organization: stored.user.organization }
-        setUser(fresh)
-        storage.setJSON(SESSION_KEY, { token: stored.token, user: fresh })
-      })
-      .catch((error) => {
-        // Keep the session when the server is only unreachable; drop it when the token is refused.
-        if (!(error instanceof ApiError) || error.status !== 0) logout()
-      })
-      .finally(() => setRestoring(false))
-    return () => setUnauthorizedHandler(null)
-    // Runs once on start-up.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const login = useCallback<AuthValue['login']>(async (email, password, keep) => {
+  const login = useCallback<AuthValue['login']>(async (email, password, remember) => {
     try {
-      const res = await api<ApiLoginResponse>('/auth/login', { method: 'POST', body: { email: email.trim().toLowerCase(), password } })
-      const u = userFromApi(res.user)
-      setAccessToken(res.accessToken)
+      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence)
+      const cred = await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password)
+      const u = await loadProfile(cred.user)
+      if (!u.active) {
+        await signOut(auth)
+        return { ok: false, error: 'disabled' }
+      }
       setUser(u)
-      setRemember(keep)
-      if (keep) storage.setJSON(SESSION_KEY, { token: res.accessToken, user: u })
-      else storage.remove(SESSION_KEY)
       return { ok: true, user: u }
     } catch (error) {
-      return loginError(error)
-    }
-  }, [])
-
-  const register = useCallback<AuthValue['register']>(async (name, email, password) => {
-    try {
-      await api<ApiLoginResponse>('/auth/register', { method: 'POST', body: { fullName: name.trim(), email: email.trim().toLowerCase(), password } })
-      return { ok: true }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) return { ok: false, error: 'exists' }
-      if (error instanceof ApiError && error.status === 0) return { ok: false, error: 'network' }
+      const c = code(error)
+      if (c === 'auth/too-many-requests') return { ok: false, error: 'rate-limited' }
+      if (c === 'auth/user-disabled') return { ok: false, error: 'disabled' }
+      if (c === 'auth/network-request-failed') return { ok: false, error: 'network' }
       return { ok: false, error: 'invalid' }
     }
   }, [])
 
-  const updateUser = useCallback<AuthValue['updateUser']>(
-    (patch) => {
-      setUser((u) => {
-        if (!u) return u
-        const next = { ...u, ...patch }
-        const session = storage.getJSON<StoredSession | null>(SESSION_KEY, null)
-        if (remember && session) storage.setJSON(SESSION_KEY, { ...session, user: next })
-        return next
-      })
-    },
-    [remember],
-  )
+  const register = useCallback<AuthValue['register']>(async (name, email, password) => {
+    registering = true
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password)
+      await updateProfile(cred.user, { displayName: name.trim() })
+      await loadProfile(cred.user, name)
+      // The register page asks the user to sign in, as before.
+      await signOut(auth)
+      return { ok: true }
+    } catch (error) {
+      const c = code(error)
+      if (c === 'auth/email-already-in-use') return { ok: false, error: 'exists' }
+      if (c === 'auth/network-request-failed') return { ok: false, error: 'network' }
+      return { ok: false, error: 'invalid' }
+    } finally {
+      registering = false
+    }
+  }, [])
+
+  const resetPassword = useCallback<AuthValue['resetPassword']>(async (email) => {
+    try {
+      await sendPasswordResetEmail(auth, email.trim().toLowerCase())
+      return { ok: true }
+    } catch (error) {
+      const c = code(error)
+      // An unknown address is not reported, so the page does not reveal which emails have accounts.
+      if (c === 'auth/user-not-found') return { ok: true }
+      if (c === 'auth/network-request-failed') return { ok: false, error: 'network' }
+      return { ok: false, error: 'invalid' }
+    }
+  }, [])
+
+  const updateUser = useCallback<AuthValue['updateUser']>((patch) => {
+    setUser((u) => (u ? { ...u, ...patch, email: u.email } : u))
+  }, [])
 
   const value = useMemo(
-    () => ({ user, restoring, login, register, logout, updateUser }),
-    [user, restoring, login, register, logout, updateUser],
+    () => ({ user, restoring, login, register, logout, resetPassword, updateUser }),
+    [user, restoring, login, register, logout, resetPassword, updateUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

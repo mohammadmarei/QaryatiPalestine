@@ -1,7 +1,6 @@
 import { Suspense } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
-import { ChevronRight, Info } from 'lucide-react'
-import { STATIC_PREVIEW } from '@/api/client'
+import { ChevronRight } from 'lucide-react'
 import { images } from '@/data/images'
 import { Logo } from '@/components/brand/Logo'
 import { LanguageToggle } from '@/components/layout/PublicNavbar'
@@ -42,15 +41,6 @@ export function AuthLayout() {
           <div className="mb-8 lg:hidden">
             <Logo />
           </div>
-          {STATIC_PREVIEW && (
-            <p className="mb-6 flex items-start gap-2.5 rounded-2xl border border-gold/40 bg-gold-50 p-3.5 text-sm text-[#7a5f2b]" role="note">
-              <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
-              {t(
-                'This online copy is for browsing the villages. Signing in, the dashboard and editing work when the full platform runs with its server.',
-                'هذه النسخة على الإنترنت لتصفّح القرى. تسجيل الدخول ولوحة الإدارة والتعديل تعمل عند تشغيل المنصة كاملة مع الخادم.',
-              )}
-            </p>
-          )}
           <Suspense fallback={<PageLoader />}>
             <Outlet />
           </Suspense>

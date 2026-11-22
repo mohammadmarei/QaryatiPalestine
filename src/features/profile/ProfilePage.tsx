@@ -13,7 +13,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useData } from '@/hooks/useData'
 import { useI18n } from '@/hooks/useI18n'
 import { useToast } from '@/hooks/useToast'
-import { sleep } from '@/utils/misc'
+import { errorMessage } from '@/firebase/errors'
 import { mailtoContact } from '@/config/contact'
 
 export function ProfilePage() {
@@ -38,11 +38,16 @@ export function ProfilePage() {
   if (!user) return null
 
   const saveInfo = async (v: Info) => {
-    await sleep(700)
-    updateSession({ name: v.name, email: v.email, organization: v.organization || undefined })
-    updateUser(user.id, { name: v.name, email: v.email, organization: v.organization || undefined })
-    info.reset(v)
-    toast.success(t('Profile saved', 'تم حفظ الملف الشخصي'), t('Updated locally in this browser.', 'تم التحديث محليًا في هذا المتصفح.'))
+    try {
+      // The sign-in email is the account's identity and is not changed here.
+      await updateUser(user.id, { name: v.name, organization: v.organization || undefined })
+    } catch (error) {
+      toast.error(t('The profile was not saved', 'لم يُحفظ الملف الشخصي'), errorMessage(error))
+      return
+    }
+    updateSession({ name: v.name, organization: v.organization || undefined })
+    info.reset({ ...v, email: user.email })
+    toast.success(t('Profile saved', 'تم حفظ الملف الشخصي'))
   }
 
   const myActivity = auditLogs.filter((l) => l.userId === user.id).length
@@ -116,7 +121,7 @@ export function ProfilePage() {
                   {(id, d) => <Input id={id} aria-describedby={d} invalid={!!info.formState.errors.name} {...info.register('name')} />}
                 </Field>
                 <Field label={t('Email', 'البريد الإلكتروني')} required error={info.formState.errors.email?.message}>
-                  {(id, d) => <Input id={id} type="email" dir="ltr" aria-describedby={d} invalid={!!info.formState.errors.email} {...info.register('email')} />}
+                  {(id, d) => <Input id={id} type="email" dir="ltr" readOnly aria-describedby={d} invalid={!!info.formState.errors.email} {...info.register('email')} />}
                 </Field>
               </div>
               <Field label={t('Organization', 'الجهة')} error={info.formState.errors.organization?.message}>

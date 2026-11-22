@@ -39,7 +39,14 @@ export function RegisterPage() {
   const onSubmit = async (v: Values) => {
     const res = await registerAccount(v.name, v.email, v.password)
     if (!res.ok) {
-      setError('email', { message: t('An account with this email already exists', 'يوجد حساب مسجّل بهذا البريد الإلكتروني') })
+      setError('email', {
+        message:
+          res.error === 'exists'
+            ? t('An account with this email already exists', 'يوجد حساب مسجّل بهذا البريد الإلكتروني')
+            : res.error === 'network'
+              ? t('No connection. Try again.', 'لا يوجد اتصال، حاول مجددًا.')
+              : t('The account could not be created', 'تعذّر إنشاء الحساب'),
+      })
       return
     }
     setDone(v.email)
@@ -54,8 +61,8 @@ export function RegisterPage() {
         <h1 className="mt-6 text-2xl font-semibold text-forest">{t('Your account is ready', 'حسابك جاهز')}</h1>
         <p className="mt-2 text-muted">
           {t(
-            `A contributor account for ${done} was created in this browser. You can now log in with it.`,
-            `تم إنشاء حساب مساهم للبريد ${done} في هذا المتصفح. يمكنك الآن تسجيل الدخول به.`,
+            `A contributor account for ${done} was created. You can now log in with it.`,
+            `تم إنشاء حساب مساهم للبريد ${done}. يمكنك الآن تسجيل الدخول به.`,
           )}
         </p>
         <ButtonLink to="/login" size="lg" className="mt-8 w-full">

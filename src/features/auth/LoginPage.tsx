@@ -60,7 +60,7 @@ export function LoginPage() {
           <div>
             <p className="font-semibold">
               {authError === 'network'
-                ? t('The server cannot be reached', 'تعذّر الوصول إلى الخادم')
+                ? t('No connection', 'لا يوجد اتصال')
                 : authError === 'rate-limited'
                   ? t('Too many attempts', 'محاولات كثيرة')
                   : authError === 'disabled'
@@ -69,7 +69,7 @@ export function LoginPage() {
             </p>
             <p className="mt-0.5 text-danger/80">
               {authError === 'network'
-                ? t('Check that the backend is running, then try again.', 'تأكد من أن الخادم يعمل ثم حاول مجددًا.')
+                ? t('Check your internet connection, then try again.', 'تحقّق من اتصالك بالإنترنت ثم حاول مجددًا.')
                 : authError === 'rate-limited'
                   ? t('Wait a minute, then try again.', 'انتظر دقيقة ثم حاول مجددًا.')
                   : t('Check your details and try again.', 'تحقق من بياناتك وحاول مجددًا.')}
