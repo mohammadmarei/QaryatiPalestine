@@ -1,0 +1,269 @@
+@import 'tailwindcss';
+@import 'leaflet/dist/leaflet.css';
+
+/* ------------------------------------------------------------------
+   Qaryati design tokens
+   Deep forest green, emerald accents and a touch of gold on calm,
+   light surfaces.
+------------------------------------------------------------------- */
+@theme {
+  --color-forest: #123c35;
+  --color-forest-700: #194c43;
+  --color-forest-800: #0b2e29;
+  --color-forest-900: #0a2925;
+
+  /* Emerald accent: use -dark for text on light backgrounds (AA contrast) */
+  --color-accent: #10b981;
+  --color-accent-light: #34d399;
+  --color-accent-dark: #047857;
+  --color-accent-50: #e9f8f2;
+
+  /* Green scale used for interactive surfaces and links */
+  --color-olive: #1a5a4e;
+  --color-olive-50: #e9f8f2;
+  --color-olive-100: #d3f0e4;
+  --color-olive-200: #b7e2d0;
+  --color-olive-300: #8fcfb4;
+  --color-olive-400: #3fbf8f;
+  --color-olive-500: #0f9f6e;
+  --color-olive-600: #1a5a4e;
+  --color-olive-700: #194c43;
+
+  /* Sage — the muted olive of the brand (location labels, wordmark) */
+  --color-sage: #7d8c58;
+
+  --color-gold: #d6b46a;
+  --color-gold-light: #d9c48d;
+  --color-gold-50: #faf5e6;
+
+  --color-limestone: #d9e3e1;
+  --color-limestone-dark: #c3d1ce;
+  --color-beige: #f1f5f4;
+  --color-mint: #f0f5f3;
+  --color-charcoal: #0b2e29;
+  --color-paper: #f8fafc;
+  --color-ink: #172033;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-stone-line: #e2e8f0;
+  --color-danger: #b64b4b;
+  --color-danger-50: #fbeeee;
+
+  --font-sans: 'Cairo', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-arabic: 'Cairo', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-latin: 'Inter', 'Cairo', ui-sans-serif, system-ui, sans-serif;
+  --font-display-ar: 'Cairo', 'Inter', sans-serif;
+
+  --radius-card: 14px;
+  --radius-panel: 16px;
+
+  --shadow-soft: 0 3px 10px rgb(15 23 42 / 0.025);
+  --shadow-lift: 0 16px 48px rgb(18 60 53 / 0.12);
+
+  --animate-fade-up: fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade-in: fade-in 0.35s ease-out both;
+  --animate-scale-in: scale-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: -200% 0;
+    }
+    to {
+      background-position: 200% 0;
+    }
+  }
+}
+
+@custom-variant rtl (&:where([dir='rtl'], [dir='rtl'] *));
+@custom-variant ltr (&:where([dir='ltr'], [dir='ltr'] *));
+
+@layer base {
+  /* Tailwind v4 defaults borders to currentColor; use the line token instead */
+  *,
+  ::after,
+  ::before,
+  ::backdrop {
+    border-color: var(--color-stone-line);
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  html[lang='en'] body {
+    font-family: var(--font-latin);
+  }
+  ::selection {
+    background: rgb(16 185 129 / 0.22);
+    color: var(--color-forest);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role='button'] {
+    cursor: pointer;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer components {
+  /* Soft mint section background */
+  .bg-stone {
+    background-color: var(--color-mint);
+  }
+
+  /* Dot grid — light dots for dark surfaces */
+  .bg-dots-light {
+    background-image: radial-gradient(circle, rgb(255 255 255 / 0.08) 1px, transparent 1px);
+    background-size: 25px 25px;
+  }
+  /* Dot grid — faint dots for light surfaces */
+  .bg-dots {
+    background-image: radial-gradient(circle, rgb(18 60 53 / 0.08) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  .card {
+    background: #fff;
+    border: 1px solid var(--color-stone-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, #eef2f1 0%, #f8fafc 50%, #eef2f1 100%);
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(18 60 53 / 0.2) transparent;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ar-display {
+    font-family: var(--font-display-ar);
+  }
+  .font-latin {
+    font-family: var(--font-latin);
+  }
+}
+
+/* Reveal-on-scroll, paired with <Reveal /> */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* User-selected reduced motion (Settings) */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+html.reduce-motion .reveal {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Leaflet harmonisation */
+.leaflet-container {
+  font-family: inherit;
+  background: #e8efed;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 14px;
+  box-shadow: var(--shadow-lift);
+  border: 1px solid var(--color-stone-line);
+}
+.leaflet-popup-content {
+  margin: 14px 16px;
+}
+.leaflet-control-zoom a {
+  color: var(--color-forest) !important;
+}
+.qaryati-marker {
+  background: transparent;
+  border: none;
+}
+.qaryati-marker svg {
+  transition: transform 0.2s ease;
+  transform-origin: bottom center;
+}
+.qaryati-marker:hover svg {
+  transform: scale(1.12);
+}
+.qaryati-tiles {
+  filter: saturate(0.85);
+}
