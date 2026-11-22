@@ -38,22 +38,18 @@ Firebase. The owner talks in Palestinian Arabic and wants replies in Arabic.
 - Import with the Admin SDK and a service-account key the owner keeps at `Desktop\firebase-key.json`.
   **Never commit that key** (it is in .gitignore). After importing, print a table of counts old vs new.
 
-## Frontend (src/)
-- The UI reads data through `src/app/DataProvider.tsx` (`useData()`), auth through
-  `src/features/auth/AuthProvider.tsx`; `src/api/client.ts` + `mappers.ts` + `types.ts` talk to the old REST
-  API. Replace that layer with Firebase; keep the pages and the UI types in `src/types`.
-- `src/api/client.ts` still has a static-preview mode and `scripts/make-static-snapshot.mjs` +
-  `src/api/static-snapshot.json` (used for a Netlify read-only copy). Remove them once Firebase works.
+## Current state (Firebase connected)
+- Project `qaryati-36f85` (site will be `qaryati-36f85.web.app`). Config in `src/config/firebase.ts`;
+  `.firebaserc` points the CLI at it. Firestore rules are deployed; the seed is imported
+  (`scripts/import-seed.ts`, counts match the dump; governorates 16 after dropping the Jenin duplicate).
+- Data layer: `src/app/DataProvider.tsx` (live listeners + batched writes), `src/features/auth/AuthProvider.tsx`,
+  `src/firebase/model.ts`. The old REST layer (`src/api/`), the static snapshot and the Netlify copy are gone.
+- Village ids are slugs of the English name (`battir`, `al-jib`); population lives inside the village doc.
+- Review flow: editors' edits apply directly and file one open review entry per record; contributors'
+  changes are proposals (`payload` = the whole record) applied on approval. Rules tested for every role.
+- Seed demo accounts are not imported; accounts come from sign-up. The first admin is set in the console.
 - Contact details shown on the site: `src/config/contact.ts`.
 - Never show the words "demo"/"تجريبي" in the UI, and never put account passwords in the bundle.
-
-## Steps the owner is doing in the Firebase console
-1. Create project `qaryati-palestine`; add a Web app (with Hosting) and send the `firebaseConfig`
-   (public, fine to commit in `src/config/firebase.ts`).
-2. Enable Authentication → Email/Password.
-3. Create Firestore (europe-west, production mode).
-4. `npm install -g firebase-tools` then `firebase login`.
-5. Download a service-account key to `Desktop\firebase-key.json` (secret).
 
 ## Working rules
 - Each task on its own branch, pushed and merged by the owner.

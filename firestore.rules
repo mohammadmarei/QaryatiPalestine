@@ -1,0 +1,163 @@
+rules_version = '2';
+
+// Qaryati permissions. There is no server: these rules are the access control.
+//
+// Roles live in users/{uid}.role: visitor (signed out) reads published villages and the sources;
+// contributor proposes changes (submissions); editor edits; reviewer verifies or rejects; admin does
+// everything and manages accounts. New sign-ups are contributors; the first admin is set by hand.
+//
+// Every change to a village, a source or an account is written in one batch with its audit entry, and
+// the rules refuse the change without it: the record names the entry in `lastAuditId`, and getAfter()
+// checks that the entry is new, written by the same user and about that record. A delete cannot carry a
+// field, so its entry has the id `del-<lastAuditId of the deleted record>`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function active() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && profile().active == true;
+    }
+    function hasRole(roles) {
+      return active() && profile().role in roles;
+    }
+    function isAdmin() { return hasRole(['admin']); }
+    function isEditor() { return hasRole(['admin', 'editor']); }
+    function isReviewer() { return hasRole(['admin', 'reviewer']); }
+
+    function auditPath(id) {
+      return /databases/$(database)/documents/auditLogs/$(id);
+    }
+    function submissionPath(id) {
+      return /databases/$(database)/documents/submissions/$(id);
+    }
+
+    // The audit entry `auditId` is written by this batch, by this user, about `target`, for one of `actions`.
+    function audited(auditId, target, actions) {
+      let entry = getAfter(auditPath(auditId)).data;
+      return auditId is string
+        && !exists(auditPath(auditId))
+        && entry.userId == request.auth.uid
+        && entry.target == target
+        && entry.action in actions;
+    }
+
+    // This batch decides the open submission `submissionId`, which is about `target`.
+    function decidedHere(submissionId, target) {
+      let before = get(submissionPath(submissionId)).data;
+      let after = getAfter(submissionPath(submissionId)).data;
+      return submissionId is string
+        && before.target == target
+        && before.status in ['pending', 'changes-requested']
+        && after.status in ['approved', 'rejected', 'changes-requested'];
+    }
+
+    // An approved proposal is applied as it was sent; any other decision only changes the review fields.
+    function reviewWriteAllowed(submissionId) {
+      let before = get(submissionPath(submissionId)).data;
+      let after = getAfter(submissionPath(submissionId)).data;
+      return (after.status == 'approved' && before.payload != null)
+        || request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['verification', 'reviewHistory', 'lastAuditId', 'lastSubmissionId', 'updatedAt']);
+    }
+
+    // A record (village or source) changed by a reviewer while deciding a submission about it.
+    function reviewerWrite(target) {
+      return isReviewer()
+        && decidedHere(request.resource.data.lastSubmissionId, target)
+        && reviewWriteAllowed(request.resource.data.lastSubmissionId)
+        && audited(request.resource.data.lastAuditId, target, ['approve', 'reject']);
+    }
+
+    // An editor's change always goes back to review.
+    function editorWrite(target) {
+      return isEditor()
+        && request.resource.data.verification == 'pending'
+        && audited(request.resource.data.lastAuditId, target, ['create', 'update', 'publish']);
+    }
+
+    // A published village needs its coordinates (no invented values: 0 means not documented).
+    function publishable() {
+      return request.resource.data.status != 'published'
+        || (request.resource.data.coordinates.lat is number && request.resource.data.coordinates.lat != 0
+            && request.resource.data.coordinates.lng is number && request.resource.data.coordinates.lng != 0);
+    }
+
+    match /villages/{villageId} {
+      allow read: if resource.data.status == 'published' || active();
+      allow create, update: if publishable()
+        && request.resource.data.status in ['published', 'draft', 'pending', 'archived']
+        && (editorWrite('villages/' + villageId) || reviewerWrite('villages/' + villageId));
+      allow delete: if isAdmin() && audited('del-' + resource.data.lastAuditId, 'villages/' + villageId, ['delete']);
+    }
+
+    match /sources/{sourceId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.title is string
+        && (editorWrite('sources/' + sourceId) || reviewerWrite('sources/' + sourceId));
+      allow delete: if isAdmin() && audited('del-' + resource.data.lastAuditId, 'sources/' + sourceId, ['delete']);
+    }
+
+    // Reference lists, written by the import (Admin SDK) or by an admin.
+    match /governorates/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /agriculturalProducts/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Proposals of contributors (with `payload`), and the review entry of every direct edit (payload null).
+    match /submissions/{submissionId} {
+      allow read: if active();
+      allow create: if active()
+        && request.resource.data.submittedBy == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.target is string
+        && 'payload' in request.resource.data
+        // Only editors may skip the proposal step, so a contributor's entry always carries its change.
+        && (request.resource.data.payload != null || isEditor());
+      allow update: if isReviewer()
+        && resource.data.status in ['pending', 'changes-requested']
+        && request.resource.data.status in ['approved', 'rejected', 'changes-requested']
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'history', 'reviewedBy', 'reviewedAt', 'lastAuditId'])
+        && audited(request.resource.data.lastAuditId, resource.data.target, ['approve', 'reject'])
+        && getAfter(auditPath(request.resource.data.lastAuditId)).data.submissionId == submissionId;
+      allow delete: if isAdmin();
+    }
+
+    // Append-only. Reviewers and admins read the whole log; everyone else their own entries.
+    match /auditLogs/{auditId} {
+      allow read: if isReviewer() || (active() && resource.data.userId == request.auth.uid);
+      allow create: if active()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();
+      // A new account is always an active contributor with the email it signed up with.
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == 'contributor'
+        && request.resource.data.active == true
+        && request.resource.data.email == request.auth.token.email;
+      // Users edit their own name and organisation; only an admin changes a role or an account's status.
+      allow update: if (signedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'organization', 'lastActiveAt']))
+        || (isAdmin() && request.resource.data.email == resource.data.email
+          && request.resource.data.role in ['admin', 'editor', 'reviewer', 'contributor']
+          && audited(request.resource.data.lastAuditId, 'users/' + uid, ['update', 'role-change']));
+      allow delete: if false;
+    }
+  }
+}

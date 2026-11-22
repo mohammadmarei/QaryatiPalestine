@@ -1,9 +1,8 @@
 /**
  * Domain types for Qaryati.
  *
- * These mirror the shape a future API is expected to return, so the mock
- * data in `src/data` can later be swapped for real requests without
- * touching the UI layer.
+ * A village is one Firestore document in this nested shape (src/firebase/model.ts adds the fields only the
+ * database needs). Items that state a fact keep the id of the source that documents it in `sourceId`.
  */
 
 export type Lang = 'ar' | 'en'
@@ -46,6 +45,10 @@ export interface HistoricalName {
   name: Bilingual
   /** The date the name first appeared, e.g. "1596" or "27 BCE". */
   period: string
+  kind?: 'historical' | 'former'
+  /** Origin or meaning of the name, as the source gives it. */
+  meaning?: string
+  sourceId?: string
 }
 
 export interface HistoricalEvent {
@@ -53,6 +56,9 @@ export interface HistoricalEvent {
   year: string
   title: Bilingual
   description: Bilingual
+  /** The full day (YYYY-MM-DD) when the source gives one. */
+  date?: string
+  sourceId?: string
 }
 
 export type HeritageKind = 'religious' | 'archaeological' | 'architecture' | 'natural' | 'cultural'
@@ -63,8 +69,9 @@ export interface HeritageSite {
   kind: HeritageKind
   period?: Bilingual
   description: Bilingual
-  /** Photo of the landmark (data URL in the demo). */
+  /** Photo of the landmark (an image URL). */
   image?: string
+  sourceId?: string
 }
 
 /** Kinds of cultural characteristic; the API and the database accept the same list. */
@@ -75,6 +82,7 @@ export interface CulturalPractice {
   category?: CulturalCategory
   title: Bilingual
   description: Bilingual
+  sourceId?: string
 }
 
 export type FacilityKind = 'school' | 'clinic' | 'library' | 'community' | 'mosque' | 'church' | 'council' | 'other'
@@ -84,17 +92,27 @@ export interface Facility {
   kind: FacilityKind
   name: Bilingual
   count?: number
+  sourceId?: string
 }
 
 export interface NearbyPlace {
   name: Bilingual
   distanceKm: number
   villageId?: string
+  sourceId?: string
 }
 
 /** A major crop and how it is farmed. */
 export interface Crop extends Bilingual {
   practices?: Bilingual
+  /** Entry of the crop catalogue (agriculturalProducts). */
+  productId?: string
+  sourceId?: string
+}
+
+/** An economic activity of the village. */
+export interface EconomicActivity extends Bilingual {
+  sourceId?: string
 }
 
 export interface Agriculture {
@@ -104,7 +122,7 @@ export interface Agriculture {
    * practices were recorded per crop; the form moves it into the first crop.
    */
   practices?: Bilingual
-  economy: Bilingual[]
+  economy: EconomicActivity[]
 }
 
 export interface Village {
@@ -173,6 +191,9 @@ export interface Source {
   publishedAt: string
   villageIds: string[]
   note?: Bilingual
+  /** When the online copy was last read (YYYY-MM-DD). */
+  accessedAt?: string
+  verification?: VerificationStatus
 }
 
 export type Role = 'admin' | 'editor' | 'reviewer' | 'contributor'
